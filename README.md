@@ -1,6 +1,7 @@
-# QUICforge
+# QUIC_NTP
 
-A python attack script built on top of aioquic to perform request forgery with QUIC
+A python attack script built on top of aioquic to perform request forgery with QUIC.
+MON_List attack for CMRF and DNS query forgery with VNRF
 
 ## Prerequisites
 
@@ -11,8 +12,7 @@ A python attack script built on top of aioquic to perform request forgery with Q
 	2. Checkout a compatible version
 	3. Apply the aioquic.diff
 	4. Follow the install instructions of aioquic
-- Lsquic (3.0.4) (For legacy support, needed for CMRF)
-- Wireshark (3.5.0) (Optional)
+- Wireshark
 
 ## Installation / Setup
 
@@ -29,122 +29,37 @@ sudo pip install scapy
 ### Installation of aioquic
 
 - Install dependencies
-	```bash
-	apt-get update && apt-get install -y git-core libssl-dev python3-dev python3-pip
-	pip3 install aiofiles asgiref httpbin starlette wsproto werkzeug==2.0.3
-	```
-- Clone the repository and apply the diff
-	```bash
+```bash
+sudo apt-get update && sudo apt-get install -y git-core libssl-dev python3-dev python3-pip
+sudo pip3 install aiofiles asgiref httpbin starlette wsproto werkzeug==2.0.3
+```
+- Clone the repository
+```bash
 	git clone https://github.com/aiortc/aioquic && cd /aioquic && git checkout tags/0.9.20
-	#TODO APPLY DIFF
-	pip3 install -e .
-	```
+```
 
-
-### Installation of lsquic for legacy mode
-
-*Tested on Ubuntu20.04*
-- Install dependencies
-	```bash
-	sudo apt update && sudo apt install -y golang libevent-dev libz-dev git cmake binutils
-	```
-- Setup boringssl
-	```bash
-	git clone https://boringssl.googlesource.com/boringssl
-	cd boringssl
-	git checkout a9670a8b476470e6f874fef3554e8059683e1413
-	cmake . &&  make
-	BORINGSSL=$PWD
-	cd ..
-	```
-- Compile lsquic
-	```bash
-	git clone https://github.com/litespeedtech/lsquic.git
-	cd lsquic
-	git checkout tags/v3.0.4
-	git submodule update --init --recursive
-	cmake -DBORINGSSL_DIR=$BORINGSSL .
-	make
-	```
-#### Changes to codbase to get a predictable CID of length 20
-
-- In `lsquic/include/lsquic.h`:
-	Change 
-	```C
-	#define LSQUIC_DF_SCID_LEN 8
-	```
-	to
-	```C
-	#define LSQUIC_DF_SCID_LEN MAX_CID_LEN
-	```
-- In `lsquic/src/liblsquic/lsquic_conn.c` create a global set of your wanted CIDs (each CID needs to be unique):
-	```C
-	static int lsquic_cid_ctr = 0;
-	char* data_buffer[10] = {
-    		"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
-    		"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
-    		"CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
-    		"DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD",
-    		"EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE",
-    		"FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
-    		"GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG",
-    		"HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH",
-    		"IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII",
-    		"JJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJJ"
-	};
-	```
-	Furthermore change the function `lsquic_generate_cid` to something similar to:
-	```C
-	if (!len){
-    		len = 20;
-    	}
-    	//Set counter to the index used as new CID for path challenges.
-    	cid->len = len;
-    	if(lsquic_cid_ctr < 10){       
-    		memcpy(cid->idbuf, data_buffer[lsquic_cid_ctr], cid->len);
-    	}
-    	else{
-    		RAND_bytes(cid->idbuf, len);
-    	}
-    	lsquic_cid_ctr++;
-	```
-	With this the all CIDs will be of length 20 and the first 10 generated CIDs will be static.
-
-
-### Installation of Development Wireshark (Optional)
-
-- Pull Git repository
-	```bash
-	git clone https://gitlab.com/wireshark/wireshark.git
-	cd wireshark
-	```
-- Install dependencies
-	```bash
-	sudo ./tools/debian-setup.sh --install-optional --install-deb-deps
-	```
-- Build Wireshark
-	```bash
-	mkdir build
-	cd build
-	cmake -G Ninja ../
-	ninja
-	sudo ninja install
-	```
-
+- Apply the diff by copying aioquic.diff from QUIC_NTP folder and pasting it in aioquic install location. Then run the following command:
+```bash
+git apply aioquic.diff
+```
 
 ## Usage
 
 ### Generate Certificates
-*Some need other formats*
-```bash
-openssl req -x509 -nodes -newkey rsa:4096 -keyout <name>.key -out <name>.pem -days 365
-```
+
+You can generate your own certificates but they must use the same name as the certificates and keys we have provided as they are hardocoded in the code
 
 ### Use the server docker containers
-**The pre-built containers can be found here https://hub.docker.com/u/yukonsec**
+- First Pull the docker container
 ```bash
-sudo docker run -p 12345:12345/udp -v </path/to/certs/>:/mnt/certs/ -v </tls/keys/output/>:/mnt/keys -it --rm <containername>
+sudo docker pull yukonsec/neqo
 ```
+- Run from inside QUIC_NTP folder
+```bash
+sudo docker run -p 12345:12345/udp -v $PWD/certs:/mnt/certs/ -v $PWD/certs:/mnt/keys -it --rm yukonsec/neqo
+```
+Here - $PWD is there to refer to current folder from which this is being run. You can replace with absolute path incase of problems.
+
 
 
 ### Use the attack script
@@ -154,10 +69,4 @@ More information about the attack script can be viewed with:
 sudo python3 request_forgery.py -h
 ```
 
-## FAQ
-**Why is this code so ugly?**
-This code developed over time from a little proof of concept script created during my master thesis. It was not planned to be publicly released and just created to proof the general possiblity of the attacks. Features where not initially planned and added on top with as little effort as possible. If you have nicer solutions (especially for the multithreading), feel free to share and contribute.
-
-**Why did you not inlude ATS, Quant, PQUIC, ...?**
-I chose open source projects that were functional at the time for the scenarios I neede them for. If an implementation is missing it was likely buggy or not listed on the quic working group's github. Also projects that were not maintained for over a year and not supporting the current versions were dropped. 
 

